@@ -1,10 +1,9 @@
 "use client";
 
-import { useState, type ChangeEvent } from "react";
+import { useEffect, useState, type ChangeEvent } from "react";
 import axios from "axios";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { BACKEND_URL } from "@/lib/api";
-import { supabase } from "@/lib/supabase";
 import { UploadCloud } from "lucide-react";
 
 type Mode = "full" | "schema_data" | "zip";
@@ -22,6 +21,17 @@ export default function UploadPage() {
   const [error, setError] = useState<string | null>(null);
 
   const router = useRouter();
+  const searchParams = useSearchParams();
+
+  const engineParam = searchParams.get("engine");
+  const engine: "postgres" | "mysql" =
+    engineParam === "mysql" ? "mysql" : "postgres";
+
+  useEffect(() => {
+    if (!engineParam) {
+      router.replace("/dashboard/new");
+    }
+  }, [engineParam, router]);
 
   function changeMode(newMode: Mode) {
     setMode(newMode);
@@ -34,101 +44,57 @@ export default function UploadPage() {
       setError(null);
 
       if (files.length === 0) {
-        if (mode === "schema_data") {
-          setError("Selecciona 2 archivos .sql (esquema y datos).");
-        } else if (mode === "zip") {
-          setError("Selecciona un archivo .zip con scripts .sql de PostgreSQL.");
-        } else {
-          setError("Selecciona un archivo .sql con esquema + datos.");
-        }
+        setError("Selecciona archivo(s)");
         return;
       }
 
-      // Validaciones por modo (lado frontend)
       if (mode === "full" && files.length !== 1) {
         setError("Modo FULL requiere exactamente 1 archivo .sql.");
         return;
       }
       if (mode === "schema_data" && files.length !== 2) {
-        setError("Modo esquema+datos requiere exactamente 2 archivos .sql.");
+        setError("Modo esquema+datos requiere 2 archivos .sql.");
         return;
       }
       if (mode === "zip" && files.length !== 1) {
-        setError("Modo ZIP requiere exactamente 1 archivo .zip.");
+        setError("Modo ZIP requiere 1 archivo .zip.");
         return;
       }
 
       setLoading(true);
 
-      // 1) Obtener sesión actual de Supabase
-      const { data: sessionData, error: sessionError } =
-        await supabase.auth.getSession();
-
-      if (sessionError) {
-        console.error("Error obteniendo sesión de Supabase:", sessionError);
-      }
-
-      const accessToken = sessionData.session?.access_token ?? "";
-      const userId = sessionData.session?.user.id ?? "";
-
-      // 2) Construir el FormData
       const form = new FormData();
       form.append("mode", mode);
+      form.append("engine", engine);
 
-      // el backend espera db_files: List[UploadFile]
       for (const f of files) {
-        form.append("db_files", f);
+        form.append("files", f);
       }
 
-      // 3) Llamar al backend (NO seteamos Content-Type, axios lo hace solo)
-      const { data } = await axios.post(`${BACKEND_URL}/upload`, form, {
-        headers: {
-          ...(accessToken && { Authorization: `Bearer ${accessToken}` }),
-          ...(userId && { "X-User-Id": userId }),
-        },
+      const res = await axios.post(`${BACKEND_URL}/upload`, form, {
+        withCredentials: true, // 🔥 JWT HttpOnly
       });
 
-      // 4) Redirigir al asistente con el id de conexión
-      const connectionId = data?.connection_id ?? data?.id ?? null;
+      const connectionId = res.data?.database_id;   // <-- usar database_id
 
       if (!connectionId) {
-        setError("El backend no devolvió un identificador de conexión.");
-        setLoading(false);
+        setError("El backend no retornó database_id");
         return;
       }
 
       router.push(`/dashboard/schema?conn=${connectionId}`);
+
     } catch (err: unknown) {
-      console.error("Error subiendo BD:", err);
-
-      if (axios.isAxiosError(err)) {
-        const status = err.response?.status;
-        const data = err.response?.data as BackendError | undefined;
-        const backendMsg = data?.detail ?? data?.message ?? data?.error;
-
-        console.error("Respuesta backend /upload:", {
-          status,
-          data: err.response?.data,
-        });
-
-        if (status === 401) {
-          setError(
-            backendMsg ||
-              "El backend devolvió 401 (No autorizado). Revisa si el espacio está protegido o si requiere un token/API key."
-          );
-        } else if (status === 400) {
-          setError(
-            backendMsg ||
-              "El servidor rechazó el archivo (400). Revisa que sea un .sql o .zip válido."
-          );
-        } else {
-          setError(
-            backendMsg ||
-              `Error del servidor (status ${status ?? "desconocido"}).`
-          );
-        }
+      if (axios.isAxiosError<BackendError>(err)) {
+        const backend = err.response?.data;
+        const msg =
+          backend?.detail ||
+          backend?.message ||
+          backend?.error ||
+          "Error al subir archivo.";
+        setError(msg);
       } else {
-        setError("Ocurrió un error inesperado al subir la base de datos.");
+        setError("Error inesperado al subir la base de datos.");
       }
     } finally {
       setLoading(false);
@@ -142,9 +108,7 @@ export default function UploadPage() {
   }
 
   function openFileDialog() {
-    const input = document.getElementById(
-      "db-file-input"
-    ) as HTMLInputElement | null;
+    const input = document.getElementById("db-file-input") as HTMLInputElement;
     input?.click();
   }
 
@@ -167,7 +131,10 @@ export default function UploadPage() {
           </div>
 
           <div className="rounded-full border border-neutral-700/70 px-4 py-1 text-xs text-neutral-300 bg-neutral-900/60">
-            Sesión NL → SQL
+            Motor seleccionado:{" "}
+            <span className="font-semibold text-white">
+              {engine === "postgres" ? "PostgreSQL" : "MySQL"}
+            </span>
           </div>
         </div>
 

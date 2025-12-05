@@ -1,14 +1,25 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { useState, FormEvent } from "react";
 import { useRouter } from "next/navigation";
-import { supabase } from "@/lib/supabase";
+import { apiFetch } from "@/lib/api";
 import Spinner from "@/components/Spinner";
+
+// -----------------------------
+// VALIDACIONES
+// -----------------------------
+function validateEmail(email: string): boolean {
+  const regex =
+    /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[A-Za-z]{2,}$/;
+  return regex.test(email);
+}
 
 export default function LoginPage() {
   const router = useRouter();
 
   const [email, setEmail] = useState("");
+  const [emailValid, setEmailValid] = useState<boolean | null>(null);
+
   const [password, setPassword] = useState("");
 
   const [error, setError] = useState("");
@@ -17,26 +28,33 @@ export default function LoginPage() {
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setError("");
+
+    if (!validateEmail(email)) {
+      setError("El correo no es válido.");
+      return;
+    }
+
+    if (!password.trim()) {
+      setError("Ingresa tu contraseña.");
+      return;
+    }
+
     setLoading(true);
 
-    const { data, error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
+    const res = await apiFetch("/auth/login", {
+      method: "POST",
+      body: JSON.stringify({ email, password }),
     });
 
-    if (error) {
-      setError(error.message);
+    const data = await res.json();
+
+    if (!res.ok) {
+      setError(data.detail ?? "Credenciales inválidas.");
       setLoading(false);
       return;
     }
 
-    // si todo ok → al dashboard
-    if (data.session) {
-      router.push("/dashboard");
-    } else {
-      setError("Email not confirmed. Revisa tu bandeja de correo.");
-      setLoading(false);
-    }
+    router.push("/dashboard");
   }
 
   return (
@@ -53,18 +71,34 @@ export default function LoginPage() {
         )}
 
         <form onSubmit={handleSubmit} className="space-y-4">
+
+          {/* EMAIL */}
           <div className="space-y-1.5">
             <label className="text-sm text-neutral-300">Email</label>
             <input
               type="email"
               required
               value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              onChange={(e) => {
+                setEmail(e.target.value);
+                setEmailValid(validateEmail(e.target.value));
+              }}
               className="w-full rounded-lg bg-neutral-800 px-3 py-2.5 text-sm outline-none ring-1 ring-neutral-700 focus:ring-2 focus:ring-white/70 transition"
               placeholder="tu@correo.com"
             />
+
+            {email.length > 0 && (
+              <p
+                className={`text-xs mt-1 transition ${
+                  emailValid ? "text-green-400" : "text-red-400"
+                }`}
+              >
+                {emailValid ? "Correo válido ✓" : "Correo no válido"}
+              </p>
+            )}
           </div>
 
+          {/* PASSWORD */}
           <div className="space-y-1.5">
             <label className="text-sm text-neutral-300">Contraseña</label>
             <input
@@ -77,12 +111,11 @@ export default function LoginPage() {
             />
           </div>
 
+          {/* BOTÓN */}
           <button
             type="submit"
             disabled={loading}
-            className={`mt-3 flex w-full items-center justify-center gap-2 rounded-lg bg-white px-4 py-2.5 text-sm font-medium text-black transition
-            hover:bg-neutral-200 active:scale-[0.99]
-            disabled:cursor-not-allowed disabled:opacity-70`}
+            className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg bg-white px-4 py-2.5 text-sm font-medium text-black transition hover:bg-neutral-200 disabled:opacity-60"
           >
             {loading ? (
               <>

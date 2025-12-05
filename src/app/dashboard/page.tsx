@@ -2,62 +2,62 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { supabase } from "@/lib/supabase";
-import type { QueryHistory, SessionData } from "@/types";
+import { BACKEND_URL } from "@/lib/api";
+import type { QueryHistory } from "@/types";
 import LoadingOverlay from "@/components/LoadingOverlay";
 import { PlusCircle } from "lucide-react";
 import QueryCard from "@/components/QueryCard";
+import axios from "axios";
+import type { AxiosError } from "axios";
 
 export default function Dashboard() {
   const router = useRouter();
 
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const [_session, setSession] = useState<SessionData | null>(null);
   const [history, setHistory] = useState<QueryHistory[]>([]);
   const [overlay, setOverlay] = useState(false);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     async function load() {
-      const { data } = await supabase.auth.getSession();
-      if (!data.session) return router.push("/auth/login");
+      try {
+        const res = await axios.get(`${BACKEND_URL}/history`, {
+          withCredentials: true, // 🔥 COOKIE JWT
+        });
 
-      const userData: SessionData = {
-        user: {
-          id: data.session.user.id,
-          email: data.session.user.email || "",
-        },
-      };
+        setHistory(res.data ?? []);
+      } catch (err) {
+        const error = err as AxiosError;
 
-      setSession(userData);
-
-      const { data: rows } = await supabase
-        .from("queries_history")
-        .select("*")
-        .eq("user_id", userData.user.id)
-        .order("created_at", { ascending: false });
-
-      setHistory(rows ?? []);
+        if (error?.response?.status === 401) {
+          router.push("/auth/login");
+          return;
+        }
+      } finally {
+        setLoading(false);
+      }
     }
 
     load();
   }, [router]);
 
   function newQuery() {
-    setOverlay(true); // mostramos loader tipo ChatGPT
-    router.push("/dashboard/upload");
+    setOverlay(true);
+    router.push("/dashboard/new");
   }
 
   return (
     <>
       <LoadingOverlay
-        show={overlay}
-        text="Abriendo asistente para nueva consulta…"
+        show={overlay || loading}
+        text={
+          loading ? "Cargando historial…" : "Abriendo asistente para nueva consulta…"
+        }
       />
 
       <div className="bg-[#0D0D0D] text-white min-h-screen p-10">
         <h1 className="text-3xl font-bold mb-6">Mis Consultas</h1>
 
-        {history.length === 0 ? (
+        {history.length === 0 && !loading ? (
           <div className="h-[70vh] flex flex-col items-center justify-center">
             <p className="text-neutral-400 mb-4">
               Aún no tienes consultas guardadas.

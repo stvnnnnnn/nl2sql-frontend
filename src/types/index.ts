@@ -12,11 +12,3 @@ export interface QueryHistory {
   sql_query: string; // SQL generado
   created_at: string;
 }
-
-// ---- Para manejar sesiones en React ----
-export interface SessionData {
-  user: {
-    id: string;
-    email: string;
-  };
-}
